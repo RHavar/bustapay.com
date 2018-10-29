@@ -1,0 +1,139 @@
+<html>
+<head>
+    <title>Make a manual bustapay transaction</title>
+
+</head>
+<body>
+    <h1>Make a manual bustapay transaction</h1>
+
+    <h3>Step 1. Create raw tranasction paying the receiver (but do not broadcast)</h3>
+    <p>
+        This can be done with any wallet of your choice, but with <strong>bitcoin core</strong>, this would be achieved with:<br><br>
+        
+                <code>
+                        bitcoin-cli createrawtransaction [] "{ \"2NABbUr9yeRCp1oUCtVmgJF8HGRCo3ifpTT\": 1.23 }"
+                </code><br>(obviously replacing that address with where you want to send, and that amount in bitcoin of how much you want to send)
+        <br><br>
+
+        Then we would need to fund it, this can be done with:<br>
+        <code>bitcoin-cli fundrawtransaction HEX_FROM_ABOVE</code><br><br>
+
+        And the finally signing it:<br>
+        <code>bitcoin-cli signrawtransactionwithwallet HEX_FROM_ABOVE</code><br>
+        (note: in older versions of bitcoin core, it was called "signrawtransaction" instead of "signrawtransactionwithwallet")
+    </p>
+
+    <h3>Step 2. Send the raw transaction to the bustapay url</h3>
+    <p>
+        This can be done with some curl magic (basically http post with a binary (not hex) encoded body).
+        But it's probably easier to use our browser-based tool. <br>
+        <em>note: this is directly sent to the bustapay url, we never log or see this</em>
+        <form>
+            bustapay url: <input type="text" id="bustapay-url-input" /><br/>
+            hex-encoded raw transaction:  <textarea id="raw-transaction-input"></textarea><br>
+            <button type="button" id="submit-bustpay" onclick="sendBustapay()">Send!</button>
+        </form>
+        <div id="response-div" style="display: none">
+               Response: <textarea disabled="disabled" id="response-text"></textarea>                
+        </div>
+    </p>
+
+    <h3>Step 3. Verify server response</h3>
+    <p>
+        We need to decode the server response, generally something like <code>bitcoin-cli decoderawtransaction HEX_FROM_SERVER</code>
+        or if you're in a pinch (not recommended) you can use <a href="https://live.blockcypher.com/btc/decodetx/" target="_blank">a web tool</a>
+    </p>
+    <p>
+        The most important thing to check is that all outputs are the same as our original transaction. They may however be shuffled, and some of the amounts maybe have increased
+        but they should <strong>never</strong> decrease, nor should any be missing. Next you want to check that all your previous inputs are still in the transaction, but their
+        signature should be stripped. And the only new inputs should be signed. In the future this tool will be updated to validate the server response, but it currently isn't done
+        so you're on your own here. If there is a problem, or you are not able to do it <strong>do not continue</strong> and just broadcast your original (normal) payment.
+    </p>
+
+    <h3>Step 4. Sign the partial transaction</h3>
+    <p>
+        Done in <strong>bitcoin core</strong> with <code>bitcoin-cli signrawtransactionwithwallet PARTIAL_TRANSACTION_IN_HEX</code><br>
+        (note: in older versions of bitcoin core, it was called "signrawtransaction" instead of "signrawtransactionwithwallet")        
+    </p>
+
+    <h3>Step 5. Broadcast the final signed transaction</h3>
+    <p>
+        In <strong>bitcoin core</strong> you could do that with: <code>bitcoin-cli sendrawtransaction FINAL_TRANSACTION_IN_HEX</code> or use
+        or if you're in a pinch (not recommended) you can use a <a href="https://live.blockcypher.com/btc/pushtx/" target="_blank">web-based tool</a>
+        although this is not recommended unless you use tor, as they almost certainly will be logging your broadcast.
+    </p>
+
+    <script type="text/javascript">
+    var oReq; // easy for debugging in browser console
+        function sendBustapay() {
+            console.log("bustpay clicked!")
+
+            var url = document.getElementById('bustapay-url-input').value;
+            if (url == "") {
+                respond("missing bustapay url");
+                return;
+            }
+
+
+            var rawTransaction = document.getElementById('raw-transaction-input').value;
+            if (rawTransaction == "") {
+                respond("missing raw transaction");
+                return;
+            }
+
+            var byteArray = new Uint8Array(rawTransaction.length/2);
+            for (var x = 0; x < byteArray.length; x++){
+                byteArray[x] = parseInt(rawTransaction.substr(x*2,2), 16);
+            }
+
+            var blob = new Blob([byteArray], {type: "application/octet-stream"});
+            console.log(URL.createObjectURL(blob));
+
+
+            respond("submitting...");
+
+            oReq = new XMLHttpRequest();
+            oReq.open("POST", url, true);
+            oReq.responseType = "arraybuffer";
+            oReq.onload = function (oEvent) {
+                console.log('response loaded: ', oEvent, oReq);
+                var arrayBuffer = oReq.response;
+                if (arrayBuffer) {
+                    if (oReq.status != 200) {
+                        // Lets convert the arrayBuffer to ascii and show..
+                        var enc = new TextDecoder("utf-8");
+                        respond(enc.decode(arrayBuffer));
+                        return;
+                    } else {
+                        // Yay, worked
+                        respond(bufferToHex(arrayBuffer));
+                    }
+
+                    var byteArray = new Uint8Array(arrayBuffer);
+                    for (var i = 0; i < byteArray.byteLength; i++) {
+                    // do something with each byte in the array
+                    }
+                } else {
+                    respond("weird couldnt get response from server?")
+                }
+            };
+
+            oReq.send(byteArray);
+
+        }
+
+        function respond(x) {
+            document.getElementById('response-div').style.display = 'block';
+            document.getElementById('response-text').innerText = x;
+        }
+
+        function bufferToHex (buffer) {
+            return Array
+                .from (new Uint8Array (buffer))
+                .map (b => b.toString (16).padStart (2, "0"))
+                .join ("");
+        }
+        
+    </script>
+</body>
+</html>
